@@ -115,7 +115,7 @@
 (defmethod frame-standard-output ((frame file-manager))
   (frame-standard-input frame))
 
-;;; Commmands
+;;; Commands
 
 (defun drag-file-feedback (frame from-presentation stream x0 y0 x1 y1 state mode)
   (case state
@@ -186,8 +186,26 @@
 
 (define-drag-and-drop-translator drag-file/copy
     (file command directory* file-manager
-     :gesture :edit
-     :feedback drag-file-feedback/copy)
+     :gesture t
+     :feedback drag-file-feedback/copy
+     :tester ((object event)
+              t #+no (if event
+                  (plusp (event-modifier-state event))
+                  t))
+     :destination-tester ((object destination-object event)
+                          (and (plusp (event-modifier-state event))
+                               (not (or (eq object destination-object)
+                                        (eq (directory* object) destination-object)))))
+     :pointer-documentation ((object destination-object stream)
+                             ; (setf (clouseau:root-object *inspector* :run-hook-p t) event)
+                             (format stream "~A ~A ~A~@[ to ~A ~A~]"
+                                     "Copy"
+                                     (type-of object) (name object)
+                                     (when destination-object
+                                       (type-of destination-object))
+                                     (when destination-object
+                                       (name destination-object)))
+                             (force-output stream)))
     (object destination-object)
   `(com-copy-file ,object ,destination-object))
 
@@ -197,17 +215,40 @@
   (disown (directory* from) from)
   (adopt to from))
 
+; (setf *inspector* (nth-value 1 (clouseau:inspect 1 :new-process t)))
+
 (define-drag-and-drop-translator drag-file/move
     (file command directory* file-manager
-     :gesture :select
-     :tester ((object)
-              t)
-     :feedback drag-file-feedback/move
-     :destination-tester ((object destination-object)
-                          (not (or (eq object destination-object)
-                                   (eq (directory* object) destination-object)))))
-    (object destination-object)
-  `(com-move-file ,object ,destination-object))
+          :gesture t
+          :tester ((object event)
+                   t #+no (if event
+                       (zerop (event-modifier-state event))
+                       t))
+          :destination-tester ((object destination-object event)
+                               (and (zerop (event-modifier-state event))
+                                    (not (or (eq object destination-object)
+                                             (eq (directory* object) destination-object)))))
+          :feedback drag-file-feedback/move
+          :pointer-documentation ((object destination-object stream)
+                                  ; (setf (clouseau:root-object *inspector* :run-hook-p t) event)
+                                  (format stream "~A ~A ~A~@[ to ~A ~A~]"
+                                          "Move"
+                                          #+no (cond
+                                                 ((plusp (event-modifier-state event))
+                                                  "Copy")
+                                                 (t
+                                                  "Move"))
+                                          (type-of object) (name object)
+                                          (when destination-object
+                                            (type-of destination-object))
+                                          (when destination-object
+                                            (name destination-object)))
+                                  (force-output stream)))
+    (object destination-object #+no event)
+  (let ((command 'com-move-file #+no (if (plusp (event-modifier-state event))
+                     'com-copy-file
+                     'com-move-file)))
+    `(,command ,object ,destination-object)))
 
 ;;;
 
