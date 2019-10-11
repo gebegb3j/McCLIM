@@ -41,6 +41,16 @@
 
 ;;; Presentation methods
 
+(defclass file-manager-view (view) ())
+
+(define-presentation-method present ((object file)
+                                     (type   file)
+                                     (stream extended-output-stream)
+                                     (view   file-manager-view)
+                                     &key)
+  (surrounding-output-with-border (stream :shape :rectangle :background +yellow+)
+    (princ (name object) stream)))
+
 (defun print-directory-contents (items stream)
   (formatting-item-list (stream)
     (map nil (lambda (child)
@@ -49,18 +59,10 @@
                           :stream stream :single-box t)))
          (sort (copy-list items) #'string< :key #'name))))
 
-(define-presentation-method present ((object file)
-                                     (type   file)
-                                     (stream extended-output-stream)
-                                     (view   t)
-                                     &key)
-  (surrounding-output-with-border (stream :shape :rectangle :background +yellow+)
-    (princ (name object) stream)))
-
 (define-presentation-method present ((object directory*)
                                      (type   directory*)
                                      (stream extended-output-stream)
-                                     (view   t)
+                                     (view   file-manager-view)
                                      &key)
   (surrounding-output-with-border (stream :shape :rectangle :background +beige+)
     (princ (name object) stream)
@@ -72,7 +74,7 @@
 (define-presentation-method present ((object root)
                                      (type   root)
                                      (stream extended-output-stream)
-                                     (view   t)
+                                     (view   file-manager-view)
                                      &key)
   (with-bounding-rectangle* (x1 y1 x2 y2) (sheet-region stream)
     (draw-rectangle* stream (+ x1 4) (+ y1 4) (- x2 4) (- y2 4) :filled nil))
@@ -87,13 +89,17 @@
           :initform (make-root
                      (make-directory "Trash")
                      (make-directory "Directory 1")
-                     (make-directory "Directory 2" (make-file "baz") (make-file "fez"))
+                     (make-directory "Directory 2"
+                                     (make-file "baz")
+                                     (make-file "fez"))
                      (make-file "whoop"))))
   (:panes
    (files      :application :display-function (lambda (frame pane)
                                                 (let ((root (root frame)))
                                                   (present root (presentation-type-of root)
-                                                           :stream pane :single-box t))))
+                                                           :stream     pane
+                                                           :single-box t)))
+                            :default-view     (make-instance 'file-manager-view))
    (interactor :interactor))
   (:layouts
    (:default
@@ -149,7 +155,7 @@
 (defun drag-file-feedback/move (frame from-presentation stream x0 y0 x1 y1 state)
   (drag-file-feedback frame from-presentation stream x0 y0 x1 y1 state :move))
 
-(define-command (com-new-file :command-table file-manager)
+(define-command (com-new-file :name t :command-table file-manager)
     ((directory directory*)
      (name string))
   (adopt directory (make-file name)))
@@ -161,7 +167,7 @@
     (directory)
   `(,directory ,(accept 'string :prompt "name")))
 
-(define-command (com-new-directory :command-table file-manager)
+(define-command (com-new-directory :name t :command-table file-manager)
     ((directory directory*)
      (name      string))
   (adopt directory (make-directory name)))
