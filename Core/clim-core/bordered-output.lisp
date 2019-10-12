@@ -128,19 +128,19 @@
 (defun %prepare-bordered-output-record (border)
   (with-slots (under record over stream shape drawing-options) border
     (with-sheet-medium (medium stream)
-      (flet ((capture-border (cont)
-               (with-identity-transformation (medium)
-                 (multiple-value-bind (cx cy) (output-record-position record)
+      (with-identity-transformation (medium)
+        (multiple-value-bind (cx cy) (output-record-position record)
+          (flet ((capture-border (cont)
                    (with-output-to-output-record (stream)
                      (setf (stream-cursor-position stream) (values cx cy))
-                     (apply cont shape stream record drawing-options))))))
-        (with-slots (under record over) border
-          (setf under (capture-border #'draw-output-border-under)
-                over  (capture-border #'draw-output-border-over))
-          (add-output-record under  border)
-          (add-output-record record border)
-          (add-output-record over   border)))
-      border)))
+                     (apply cont shape stream record drawing-options))))
+            (with-slots (under record over) border
+              (setf under (capture-border #'draw-output-border-under)
+                    over  (capture-border #'draw-output-border-over))
+              (add-output-record under  border)
+              (add-output-record record border)
+              (add-output-record over   border)))
+          border)))))
 
 (defmethod make-bordered-output-record
     (stream shape inner-record &rest drawing-options)
