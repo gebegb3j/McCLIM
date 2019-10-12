@@ -457,15 +457,14 @@ the associated sheet can be determined."
 (defmethod add-output-record :after (child (record compound-output-record))
   (recompute-extent-for-new-child record child)
   (when (eq record (output-record-parent child))
-    (let ((sheet (find-output-record-sheet record)))
-      (when sheet (note-output-record-got-sheet child sheet)))))
+    (when-let ((sheet (find-output-record-sheet record)))
+      (note-output-record-got-sheet child sheet))))
 
 (defmethod delete-output-record :before (child (record basic-output-record)
                                          &optional (errorp t))
   (declare (ignore errorp))
-  (let ((sheet (find-output-record-sheet record)))
-    (when sheet
-      (note-output-record-lost-sheet child sheet))))
+  (when-let ((sheet (find-output-record-sheet record)))
+    (note-output-record-lost-sheet child sheet)))
 
 (defmethod delete-output-record (child (record basic-output-record)
                                  &optional (errorp t))
@@ -482,17 +481,15 @@ the associated sheet can be determined."
   (error "Cannot clear ~S." record))
 
 (defmethod clear-output-record :before ((record compound-output-record))
-  (let ((sheet (find-output-record-sheet record)))
-    (when sheet
-      (map-over-output-records #'note-output-record-lost-sheet record 0 0 sheet))))
+  (when-let ((sheet (find-output-record-sheet record)))
+    (map-over-output-records #'note-output-record-lost-sheet record 0 0 sheet)))
 
 (defmethod clear-output-record :around ((record compound-output-record))
   (multiple-value-bind (x1 y1 x2 y2) (bounding-rectangle* record)
     (call-next-method)
     (assert (null-bounding-rectangle-p record))
-    (when (output-record-parent record)
-      (recompute-extent-for-changed-child
-       (output-record-parent record) record x1 y1 x2 y2))))
+    (when-let ((parent (output-record-parent record)))
+      (recompute-extent-for-changed-child parent record x1 y1 x2 y2))))
 
 (defmethod clear-output-record :after ((record compound-output-record))
   (with-slots (x y) record
@@ -587,10 +584,9 @@ the associated sheet can be determined."
            (setf (rectangle-edges* record)
                  (values (min old-x1 x1-child) (min old-y1 y1-child)
                          (max old-x2 x2-child) (max old-y2 y2-child))))))
-      (let ((parent (output-record-parent record)))
-        (when parent
-          (recompute-extent-for-changed-child
-           parent record old-x1 old-y1 old-x2 old-y2)))))
+      (when-let ((parent (output-record-parent record)))
+        (recompute-extent-for-changed-child
+         parent record old-x1 old-y1 old-x2 old-y2))))
   record)
 
 (defun %tree-recompute-extent* (record)
@@ -623,7 +619,7 @@ the associated sheet can be determined."
 (defmethod recompute-extent-for-changed-child
     ((record compound-output-record) changed-child
      old-min-x old-min-y old-max-x old-max-y)
-  (with-bounding-rectangle* (ox1 oy1 ox2 oy2)  record
+  (with-bounding-rectangle* (ox1 oy1 ox2 oy2) record
     (with-bounding-rectangle* (cx1 cy1 cx2 cy2) changed-child
       ;; If record is currently empty, use the child's bbox
       ;; directly. Else..  Does the new rectangle of the child contain
