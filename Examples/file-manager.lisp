@@ -155,6 +155,9 @@
 (defun drag-file-feedback/move (frame from-presentation stream x0 y0 x1 y1 state)
   (drag-file-feedback frame from-presentation stream x0 y0 x1 y1 state :move))
 
+(defun drag-file-feedback/invalid (frame from-presentation stream x0 y0 x1 y1 state)
+  (drag-file-feedback frame from-presentation stream x0 y0 x1 y1 state :invalid))
+
 (define-command (com-new-file :name t :command-table file-manager)
     ((directory directory*)
      (name string))
@@ -184,6 +187,25 @@
   (format t "Copying ~A to ~A~%" (name from) (name to))
   (adopt to (make-file (name from))))
 
+(define-drag-and-drop-translator drag-file/invalid
+    (file command directory* file-manager
+     :gesture t
+     :priority -1
+     :feedback drag-file-feedback/invalid
+     :pointer-documentation ((object destination-object stream event)
+                                        ; (setf (clouseau:root-object *inspector* :run-hook-p t) event)
+                             (format stream "~A ~A ~A~@[ to ~A ~A~] with ~D"
+                                     "Cannot drag"
+                                     (type-of object) (name object)
+                                     (when destination-object
+                                       (type-of destination-object))
+                                     (when destination-object
+                                       (name destination-object))
+                                     (event-modifier-state event))
+                             (force-output stream)))
+    (object destination-object)
+  nil)
+
 (define-drag-and-drop-translator drag-file/copy
     (file command directory* file-manager
      :gesture t
@@ -193,7 +215,8 @@
                   (plusp (event-modifier-state event))
                   t))
      :destination-tester ((object destination-object event)
-                          (and (plusp (event-modifier-state event))
+                          (print (event-modifier-state event) *trace-output*)
+                          (and (= (event-modifier-state event) 1024)
                                (not (or (eq object destination-object)
                                         (eq (directory* object) destination-object)))))
      :pointer-documentation ((object destination-object stream)

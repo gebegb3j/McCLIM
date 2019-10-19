@@ -143,28 +143,33 @@
   (frob pointer-button-press-event   presentation-button-press-handler   button-press-handler)
   (frob pointer-button-release-event presentation-button-release-handler button-release-handler))
 
-(defun invoke-tracking-pointer (state
-                                &aux
-                                  (sheet (tracked-sheet state))
-                                  (multiple-window (multiple-window state))
-                                  (transformp (transformp state)))
-  (flet ((pointer-event-position (event)
-           (let ((sheet (event-sheet event)))
-             (get-pointer-position (sheet event)
-               (if (not transformp)
-                   (values x y)
-                   (with-sheet-medium (medium sheet)
-                     (transform-position (medium-transformation medium) x y)))))))
-    (loop
-       for event = (event-read sheet)
-       do (if (and (not multiple-window)
-                   (not (eql sheet (event-sheet event))))
-              ;; Event is not intercepted.
-              (handle-event (event-sheet event) event)
-              (multiple-value-bind (x y)
-                  (when (typep event 'pointer-event)
-                    (pointer-event-position event))
-                (track-event state event x y))))))
+(defun invoke-tracking-pointer (state)
+  (let ((sheet (tracked-sheet state))
+        (multiple-window (multiple-window state))
+        (transformp (transformp state))
+        last-x last-y)
+    (flet ((pointer-event-position (event)
+             (let ((sheet (event-sheet event)))
+               (get-pointer-position (sheet event)
+                 (if (not transformp)
+                     (values x y)
+                     (with-sheet-medium (medium sheet)
+                       (transform-position (medium-transformation medium) x y)))))))
+      (letf (((port-keyboard-input-focus (port sheet)) sheet))
+        (loop for event = (event-read sheet)
+              do (cond ;; Event is not intercepted.
+                   ((and (not multiple-window)
+                         (not (eql sheet (event-sheet event))))
+
+                    (handle-event (event-sheet event) event))
+                   ;; Pointer events have a position.
+                   ((typep event 'pointer-event)
+                    (multiple-value-bind (x y) (pointer-event-position event)
+                      (setf last-x x last-y y)
+                      (track-event state event x y)))
+                   ;; Other events use the previous positions.
+                   (t
+                    (track-event state event last-x last-y))))))))
 
 (defmacro tracking-pointer
     ((sheet &rest args &key pointer multiple-window transformp context-type highlight)

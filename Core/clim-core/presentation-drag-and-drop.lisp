@@ -125,24 +125,49 @@
          (initial-y y)
          (last-presentation nil)
          (last-event nil))
-    (flet ((find-dest-translator (presentation event window x y)
-             (loop for translator in translators
-                when (and (presentation-subtypep (presentation-type presentation)
-                                                 (destination-type translator))
-                          (test-drag-and-drop translator presentation
-                                              context-type frame event window x y))
-                do (return-from find-dest-translator translator))
-             nil)
-           (erase-old ()
-             (when last-event
-               (let ((window (event-sheet last-event))
-                     (x (pointer-event-x last-event))
-                     (y (pointer-event-y last-event)))
-                 (maybe-funcall feedback-fn frame from-presentation
-                                window initial-x initial-y x y :unhighlight)
-                 (when last-presentation
-                   (maybe-funcall highlight-fn frame last-presentation
-                                  window :unhighlight))))))
+    (labels ((find-dest-translator (presentation event window x y)
+               (loop for translator in translators
+                     when (and (presentation-subtypep (presentation-type presentation)
+                                                      (destination-type translator))
+                               (test-drag-and-drop translator presentation
+                                                   context-type frame event window x y))
+                     do (return-from find-dest-translator translator))
+               nil)
+             (erase-old ()
+               (when last-event
+                 (let ((window (event-sheet last-event))
+                       (x (pointer-event-x last-event))
+                       (y (pointer-event-y last-event)))
+                   (maybe-funcall feedback-fn frame from-presentation
+                                  window initial-x initial-y x y :unhighlight)
+                   (when last-presentation
+                     (maybe-funcall highlight-fn frame last-presentation
+                                    window :unhighlight)))))
+             (update-feedback-and-documentation (translator presentation event window x y)
+               (maybe-funcall feedback-fn frame from-presentation
+                              window initial-x initial-y x y :highlight)
+               (document-drag-n-drop
+                translator presentation context-type frame event window x y))
+             (update-for-presentation (presentation event window x y)
+               (erase-old)
+               (let ((dest-translator (if presentation
+                                          (find-dest-translator presentation event window x y)
+                                          nil)))
+                 (if dest-translator
+                     (setf last-event event
+                           last-presentation presentation
+                           feedback-fn (feedback dest-translator)
+                           highlight-fn (highlighting dest-translator))
+                     (setf last-event event
+                           last-presentation nil
+                           feedback-fn (feedback translator)
+                           highlight-fn (highlighting translator)))
+                 ;; Do not highlight the presentation if there is no
+                 ;; applicable translator. -- jd 2019-08-20
+                 (when dest-translator
+                   (maybe-funcall highlight-fn frame presentation window :highlight))
+                 (update-feedback-and-documentation
+                  (or dest-translator translator) last-presentation event window x y))))
       (block do-tracking
         (tracking-pointer (window :context-type `(or ,@(mapcar #'destination-type translators))
                                   ;; context-type should be T and we
@@ -150,35 +175,21 @@
                                   ;; inside :presentation clause
                                   :highlight nil
                                   :multiple-window multiple-window)
-          (:presentation (&key presentation window event x y)
-            (let ((dest-translator (find-dest-translator presentation event window x y)))
-              (erase-old)
-              (if dest-translator
-                  (setf last-event event
-                        last-presentation presentation
-                        feedback-fn (feedback dest-translator)
-                        highlight-fn (highlighting dest-translator))
-                  (setf last-event event
-                        last-presentation nil
-                        feedback-fn (feedback translator)
-                        highlight-fn (highlighting translator)))
-              ;; Do not highlight the presentation if there is no
-              ;; applicable translator. -- jd 2019-08-20
-              (when dest-translator
-                (maybe-funcall highlight-fn frame presentation window :highlight))
-              (maybe-funcall feedback-fn frame from-presentation
-                             window initial-x initial-y x y :highlight)
-              (document-drag-n-drop (or dest-translator translator) last-presentation
-                                    context-type frame event window x y)))
+          (:presentation (&key presentation event window x y)
+            (update-for-presentation presentation event window x y))
           (:pointer-motion (&key event window x y)
             (erase-old)
             (setq last-event event
                   last-presentation nil)
-            (maybe-funcall feedback-fn frame from-presentation
-                           window initial-x initial-y x y :highlight)
-            (document-drag-n-drop translator nil
-                                  context-type frame event window
-                                  x y))
+            (update-feedback-and-documentation translator nil event window x y))
+          (:keyboard (&key event)
+            (describe event *trace-output*)
+            (let ((new-event (shallow-copy-object last-event)))
+              (reinitialize-instance
+               new-event :modifier-state (event-modifier-state event))
+              (update-for-presentation
+               last-presentation new-event window
+               (pointer-event-x new-event) (pointer-event-y new-event))))
           (:presentation-button-press (&key presentation event)
             (unless finish-on-release
               (setq destination-presentation presentation
