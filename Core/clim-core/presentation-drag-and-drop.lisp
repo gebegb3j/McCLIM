@@ -183,7 +183,6 @@
                   last-presentation nil)
             (update-feedback-and-documentation translator nil event window x y))
           (:keyboard (&key event)
-            (describe event *trace-output*)
             (let ((new-event (shallow-copy-object last-event)))
               (reinitialize-instance
                new-event :modifier-state (event-modifier-state event))
