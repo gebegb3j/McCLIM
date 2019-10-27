@@ -94,19 +94,21 @@
                                      (make-file "fez"))
                      (make-file "whoop"))))
   (:panes
-   (files      :application :display-function (lambda (frame pane)
-                                                (let ((root (root frame)))
-                                                  (present root (presentation-type-of root)
-                                                           :stream     pane
-                                                           :single-box t)))
-                            :default-view     (make-instance 'file-manager-view))
-   (interactor :interactor))
+   (explananation :label :label "Drag files and directories. Modifier keys change move, copy, etc.")
+   (files         :application :display-function (lambda (frame pane)
+                                                   (let ((root (root frame)))
+                                                     (present root (presentation-type-of root)
+                                                              :stream     pane
+                                                              :single-box t)))
+                               :default-view     (make-instance 'file-manager-view))
+   (interactor    :interactor))
   (:layouts
    (:default
     (vertically ()
-      (7/8 files)
+      explananation
+      (7/9 files)
       (make-pane 'clime:box-adjuster-gadget)
-      (1/8 interactor))))
+      (1/9 interactor))))
   (:menu-bar              nil)
   (:pointer-documentation t)
   (:default-initargs
@@ -116,6 +118,30 @@
   (frame-standard-input frame))
 
 ;;; Commands
+
+(define-command (com-new-file :name t :command-table file-manager)
+    ((directory directory*)
+     (name string))
+  (adopt directory (make-file name)))
+
+(define-presentation-to-command-translator directory->com-new-file
+    (directory* com-new-file file-manager
+                :gesture :select :priority -1
+                :documentation ((object stream) (format stream "New file")))
+    (directory)
+  `(,directory ,(accept 'string :prompt "name")))
+
+(define-command (com-new-directory :name t :command-table file-manager)
+    ((directory directory*)
+     (name      string))
+  (adopt directory (make-directory name)))
+
+(define-presentation-to-command-translator directory->com-new-directory
+    (directory* com-new-directory file-manager
+                :gesture :select :priority -1
+                :documentation ((object stream) (format stream "New directory")))
+    (directory)
+  `(,directory ,(accept 'string :prompt "name")))
 
 (defun drag-file-feedback (frame from-presentation stream x0 y0 x1 y1 state mode)
   (case state
@@ -158,29 +184,22 @@
 (defun drag-file-feedback/invalid (frame from-presentation stream x0 y0 x1 y1 state)
   (drag-file-feedback frame from-presentation stream x0 y0 x1 y1 state :invalid))
 
-(define-command (com-new-file :name t :command-table file-manager)
-    ((directory directory*)
-     (name string))
-  (adopt directory (make-file name)))
+(defun drag-documentation (object destination-object event description stream)
+  (format stream "~A ~A ~A~
+                  ~:[~*~; to ~:*~A ~A~]~
+                  ~@[ with modifiers ~D~]"
+          description (type-of object) (name object)
+          (when destination-object
+            (type-of destination-object))
+          (when destination-object
+            (name destination-object))
+          (when event
+            (event-modifier-state event)))
+  (force-output stream))
 
-(define-presentation-to-command-translator directory->com-new-file
-    (directory* com-new-file file-manager
-     :gesture :select :priority -1
-     :documentation ((object stream) (format stream "New file")))
-    (directory)
-  `(,directory ,(accept 'string :prompt "name")))
-
-(define-command (com-new-directory :name t :command-table file-manager)
-    ((directory directory*)
-     (name      string))
-  (adopt directory (make-directory name)))
-
-(define-presentation-to-command-translator directory->com-new-directory
-    (directory* com-new-directory file-manager
-     :gesture :select :priority -1
-     :documentation ((object stream) (format stream "New directory")))
-    (directory)
-  `(,directory ,(accept 'string :prompt "name")))
+(defun not-same-or-old-parent (object destination-object)
+  (not (or (eq object destination-object)
+           (eq (directory* object) destination-object))))
 
 (define-command (com-copy-file :command-table file-manager)
     ((from file) (to directory*))
@@ -191,44 +210,26 @@
     (file command directory* file-manager
      :gesture t
      :priority -1
+     :tester ((object) (not (typep object 'root)))
      :feedback drag-file-feedback/invalid
      :pointer-documentation ((object destination-object stream event)
-                                        ; (setf (clouseau:root-object *inspector* :run-hook-p t) event)
-                             (format stream "~A ~A ~A~@[ to ~A ~A~] with ~D"
-                                     "Cannot drag"
-                                     (type-of object) (name object)
-                                     (when destination-object
-                                       (type-of destination-object))
-                                     (when destination-object
-                                       (name destination-object))
-                                     (event-modifier-state event))
-                             (force-output stream)))
+                             (drag-documentation
+                              object destination-object event "Cannot drag" stream)))
     (object destination-object)
   nil)
 
 (define-drag-and-drop-translator drag-file/copy
     (file command directory* file-manager
      :gesture t
-     :feedback drag-file-feedback/copy
-     :tester ((object event)
-              t #+no (if event
-                  (plusp (event-modifier-state event))
-                  t))
+     :tester ((object) (not (typep object 'root)))
      :destination-tester ((object destination-object event)
-                          (print (event-modifier-state event) *trace-output*)
                           (and (= (event-modifier-state event) 1024)
-                               (not (or (eq object destination-object)
-                                        (eq (directory* object) destination-object)))))
-     :pointer-documentation ((object destination-object stream)
-                             ; (setf (clouseau:root-object *inspector* :run-hook-p t) event)
-                             (format stream "~A ~A ~A~@[ to ~A ~A~]"
-                                     "Copy"
-                                     (type-of object) (name object)
-                                     (when destination-object
-                                       (type-of destination-object))
-                                     (when destination-object
-                                       (name destination-object)))
-                             (force-output stream)))
+                               (not-same-or-old-parent
+                                object destination-object)))
+     :feedback drag-file-feedback/copy
+     :pointer-documentation ((object destination-object event stream)
+                             (drag-documentation
+                              object destination-object nil "Copy" stream)))
     (object destination-object)
   `(com-copy-file ,object ,destination-object))
 
@@ -238,42 +239,22 @@
   (disown (directory* from) from)
   (adopt to from))
 
-; (setf *inspector* (nth-value 1 (clouseau:inspect 1 :new-process t)))
-
 (define-drag-and-drop-translator drag-file/move
     (file command directory* file-manager
-          :gesture t
-          :tester ((object event)
-                   t #+no (if event
-                       (zerop (event-modifier-state event))
-                       t))
-          :destination-tester ((object destination-object event)
-                               (and (zerop (event-modifier-state event))
-                                    (not (or (eq object destination-object)
-                                             (eq (directory* object) destination-object)))))
-          :feedback drag-file-feedback/move
-          :pointer-documentation ((object destination-object stream)
-                                  ; (setf (clouseau:root-object *inspector* :run-hook-p t) event)
-                                  (format stream "~A ~A ~A~@[ to ~A ~A~]"
-                                          "Move"
-                                          #+no (cond
-                                                 ((plusp (event-modifier-state event))
-                                                  "Copy")
-                                                 (t
-                                                  "Move"))
-                                          (type-of object) (name object)
-                                          (when destination-object
-                                            (type-of destination-object))
-                                          (when destination-object
-                                            (name destination-object)))
-                                  (force-output stream)))
-    (object destination-object #+no event)
-  (let ((command 'com-move-file #+no (if (plusp (event-modifier-state event))
-                     'com-copy-file
-                     'com-move-file)))
-    `(,command ,object ,destination-object)))
+     :gesture t
+     :tester ((object) (not (typep object 'root)))
+     :destination-tester ((object destination-object event)
+                          (and (zerop (event-modifier-state event))
+                               (not-same-or-old-parent
+                                object destination-object)))
+     :feedback drag-file-feedback/move
+     :pointer-documentation ((object destination-object event stream)
+                             (drag-documentation
+                              object destination-object nil "Move" stream)))
+    (object destination-object)
+  `(com-move-file ,object ,destination-object))
 
-;;;
+;;; Interface
 
 (defun run-file-manager ()
   (run-frame-top-level (make-application-frame 'file-manager)))
