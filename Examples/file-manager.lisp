@@ -39,6 +39,20 @@
 (defun make-root (&rest children)
   (make-instance 'root :name "<root>" :children children))
 
+;;; Operations
+
+(defmethod copy ((from file) (to directory*))
+  (adopt to (make-file (name from))))
+
+(defmethod copy ((from directory*) (to directory*))
+  (let ((new (make-directory (name from))))
+    (adopt to new)
+    (map nil (alexandria:rcurry #'copy new) (children from))))
+
+(defmethod move ((from file) (to directory*))
+  (disown (directory* from) from)
+  (adopt to from))
+
 ;;; Presentation methods
 
 (defclass file-manager-view (view) ())
@@ -83,6 +97,12 @@
 
 ;;; Application
 
+(defvar *explanation*
+  "Drag and drop files and directories to move, copy, etc.
+   The modifier keys the action when the object is dropped:
+   no modifier          → the item is moved
+   meta (often alt key) → the item is copied.")
+
 (define-application-frame file-manager ()
   ((%root :initarg  :root
           :reader   root
@@ -94,7 +114,7 @@
                                      (make-file "fez"))
                      (make-file "whoop"))))
   (:panes
-   (explananation :label :label "Drag files and directories. Modifier keys change move, copy, etc.")
+   (explananation :label :label *explanation*)
    (files         :application :display-function (lambda (frame pane)
                                                    (let ((root (root frame)))
                                                      (present root (presentation-type-of root)
@@ -201,11 +221,6 @@
   (not (or (eq object destination-object)
            (eq (directory* object) destination-object))))
 
-(define-command (com-copy-file :command-table file-manager)
-    ((from file) (to directory*))
-  (format t "Copying ~A to ~A~%" (name from) (name to))
-  (adopt to (make-file (name from))))
-
 (define-drag-and-drop-translator drag-file/invalid
     (file command directory* file-manager
      :gesture t
@@ -217,6 +232,11 @@
                               object destination-object event "Cannot drag" stream)))
     (object destination-object)
   nil)
+
+(define-command (com-copy-file :command-table file-manager)
+    ((from file) (to directory*))
+  (format t "Copying ~A to ~A~%" (name from) (name to))
+  (copy from to))
 
 (define-drag-and-drop-translator drag-file/copy
     (file command directory* file-manager
@@ -236,8 +256,7 @@
 (define-command (com-move-file :command-table file-manager)
     ((from file) (to directory*))
   (format t "Moving ~A to ~A~%" (name from) (name to))
-  (disown (directory* from) from)
-  (adopt to from))
+  (move from to))
 
 (define-drag-and-drop-translator drag-file/move
     (file command directory* file-manager
