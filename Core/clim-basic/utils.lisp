@@ -466,6 +466,17 @@ in KEYWORDS removed."
       (declare (dynamic-extent #',cont))
       (,fun ,@to-bind #',cont ,@to-pass))))
 
+;;; Macro writing
+
+(defmacro with-current-source-form ((form &rest more-forms) &body body)
+  "Associate errors signaled while executing BODY with FORM.
+MORE-FORMS are used when FORM is unsuitable (for example some
+implementations cannot associate errors with atoms). MORE-FORMS should
+be forms containing FORM."
+  #-sbcl (declare (ignore form more-forms))
+  #+sbcl `(sb-ext:with-current-source-form (,form ,@more-forms) ,@body)
+  #-sbcl `(progn ,@body))
+
 ;;;; ----------------------------------------------------------------------
 
 ;;; FIXME valid space specification format is described in the section
