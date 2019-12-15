@@ -100,7 +100,8 @@ input focus. This is a McCLIM extension."))
    (current-panes :initform nil :accessor frame-current-panes)
    (layouts :initform nil
             :initarg :layouts
-            :reader frame-layouts)
+            :reader frame-layouts
+            :writer (setf %frame-layouts))
    (current-layout :initform nil
                    :initarg :current-layout
                    :accessor frame-current-layout)
@@ -755,29 +756,42 @@ documentation produced by presentations.")
   (setf (slot-value pane 'name) name)
   pane)
 
-(defun do-pane-creation-form (name form)
-  (cond
-    ;; Single form which is a function call
-    ((and (= (length form) 1)
-          (listp (first form)))
-     `(coerce-pane-name ,(first form) ',name))
-    ;; Standard pane denoted by a keyword (i.e `:application')
-    ((keywordp (first form))
-     (case (first form)
-       (:application `(make-clim-application-pane
-                       :name ',name ,@(cdr form)))
-       (:interactor `(make-clim-interactor-pane
-                      :name ',name ,@(cdr form)))
-       (:pointer-documentation `(make-clim-pointer-documentation-pane
-                                 :name ',name ,@(cdr form)))
-       (:command-menu `(make-clim-command-menu-pane
-                                :name ',name ,@(cdr form)))
-       (otherwise `(make-pane ,(first form) :name ',name ,@(cdr form)))))
-    ;; Non-standard pane designator fed to the `make-pane'
-    (t `(make-pane ',(first form) :name ',name ,@(cdr form)))))
+(defun %generic-make-or-reinitialize-pane
+    (panes-for-layout abstract-class-name name &rest initargs)
+  (if-let ((pane (alexandria:assoc-value
+                  panes-for-layout name :test #'eq)))
+    (progn
+      (when-let ((parent (sheet-parent pane)))
+        (sheet-disown-child parent pane))
+      (apply #'reinitialize-instance pane initargs))
+    (apply #'make-pane abstract-class-name :name name initargs)))
+
+(defun make-ensure-pane-form (name form panes-for-layout-var)
+  (flet ((generic-make-or-reinitialize-pane ()
+           (if panes-for-layout-var
+               `(%generic-make-or-reinitialize-pane
+                 ,panes-for-layout-var ',(first form) ',name ,@(rest form))
+               `(make-pane ',(first form) :name ',name ,@(rest form)))))
+    (cond ((and (= (length form) 1) ; Single form which is a function call
+                (listp (first form)))
+           `(coerce-pane-name ,(first form) ',name))
+          ((keywordp (first form)) ; Standard pane (i.e `:application')
+           (case (first form)
+             (:application `(make-clim-application-pane
+                             :name ',name ,@(cdr form)))
+             (:interactor `(make-clim-interactor-pane
+                            :name ',name ,@(cdr form)))
+             (:pointer-documentation `(make-clim-pointer-documentation-pane
+                                       :name ',name
+                                       ,@(cdr form)))
+             (:command-menu `(make-clim-command-menu-pane
+                              :name ',name ,@(cdr form)))
+             (otherwise (generic-make-or-reinitialize-pane))))
+          (t ; Non-standard pane designator fed to the `make-pane'
+           (generic-make-or-reinitialize-pane)))))
 
 (defun make-generate-panes-form (class-name menu-bar panes layouts
-                                 pointer-documentation)
+                                 pointer-documentation reinitializep)
   (when pointer-documentation
     (setf panes (append panes
                         '((%pointer-documentation%
@@ -785,16 +799,17 @@ documentation produced by presentations.")
   `(defmethod generate-panes ((fm frame-manager) (frame ,class-name))
      (let ((*application-frame* frame))
        (with-look-and-feel-realization (fm frame)
-         (unless (frame-panes-for-layout frame)
+         ;; Make (or reinitialize) pane instances and establish
+         ;; lexical variables so layout forms can use them.
+         (let* (,@(when reinitializep
+                    `((old-panes (frame-panes-for-layout frame))))
+                ,@(loop for (name . form) in panes
+                        collect `(,name ,(make-ensure-pane-form
+                                          name form
+                                          (when reinitializep 'old-panes)))))
            (setf (frame-panes-for-layout frame)
-                 (list
-                  ,@(loop for (name . form) in panes
-                          collect `(cons ',name ,(do-pane-creation-form
-                                                   name form))))))
-         (let ,(loop for (name . form) in panes
-                     collect `(,name (alexandria:assoc-value
-                                      (frame-panes-for-layout frame)
-                                      ',name :test #'eq)))
+                 (list ,@(loop for (name) in panes
+                               collect `(cons ',name ,name))))
            ;; [BTS] added this, but is not sure that this is correct for
            ;; adding a menu-bar transparently, should also only be done
            ;; where the exterior window system does not support menus
@@ -828,23 +843,25 @@ documentation produced by presentations.")
 
 (defun parse-define-application-frame-options (options)
   (let ((infos '(;; CLIM
-                 (:pane                  * :conflicts (:panes :layouts))
-                 (:panes                 * :conflicts (:pane))
-                 (:layouts               * :conflicts (:pane))
-                 (:command-table         1)
-                 (:command-definer       1)
-                 (:menu-bar              ensure-1)
-                 (:disabled-commands     *)
-                 (:top-level             1)
+                 (:pane                             * :conflicts (:panes :layouts))
+                 (:panes                            * :conflicts (:pane))
+                 (:layouts                          * :conflicts (:pane))
+                 (:command-table                    1)
+                 (:command-definer                  1)
+                 (:menu-bar                         ensure-1)
+                 (:disabled-commands                *)
+                 (:top-level                        1)
                  ;; icon
-                 (:geometry              *)
+                 (:geometry                         *)
                  ;; resize-frame
                  ;; McCLIM extensions
-                 (:pointer-documentation 1)
+                 (:pointer-documentation            1)
+                 (:update-instances-on-redefinition 1 :conflicts (:metaclass))
                  ;; Default initargs
-                 (:pretty-name           1)
+                 (:pretty-name                      1)
                  ;; Common Lisp
-                 (:default-initargs      *)))
+                 (:default-initargs                 *)
+                 (:metaclass                        1 :conflicts (:update-instances-on-redefinition))))
         (all-values '()))
     (labels ((definedp (key)
                (not (eq (getf all-values key 'undefined) 'undefined)))
@@ -907,10 +924,12 @@ documentation produced by presentations.")
                             geometry
                             ;; McCLIM extensions
                             pointer-documentation
+                            update-instances-on-redefinition
                             ;; Default initargs
                             (pretty-name (string-capitalize name))
                             ;; Common Lisp
                             user-default-initargs
+                            metaclass
                             other-options
                             ;; Helpers
                             (current-layout (first (first layouts)))
@@ -919,7 +938,12 @@ documentation produced by presentations.")
     (when (eq command-definer t)
       (setf command-definer
             (alexandria:symbolicate '#:define- name '#:-command)))
-    `(progn
+    ;; If the frame class is being (re)defined with instance updating,
+    ;; delay the redefinition notification until after all forms have
+    ;; executed.
+    `(,(if update-instances-on-redefinition
+           'with-delayed-redefinition-notifications
+           'progn)
        (defclass ,name ,superclasses
          ,slots
          (:default-initargs
@@ -936,10 +960,15 @@ documentation produced by presentations.")
                                 ,@(cdr top-level)))
           ,@geometry
           ,@user-default-initargs)
+         ,@(cond (metaclass
+                  `((:metaclass ,metaclass)))
+                 (update-instances-on-redefinition
+                  `((:metaclass redefinition-updates-instances-class))))
          ,@other-options)
 
        ,(make-generate-panes-form
-         name menu-bar panes layouts pointer-documentation)
+         name menu-bar panes layouts pointer-documentation
+         update-instances-on-redefinition)
 
        ,@(when command-table
            `((define-command-table ,@command-table)))
